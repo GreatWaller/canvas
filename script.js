@@ -16,9 +16,121 @@ let selectedSector = null;
 let initialMouseAngle = 0;
 let initialStartAngle = 0;
 let initialEndAngle = 0;
+let initialRadius = 0;
 let isDragging = false;
+let isResizing = false;
+// 定义红点的半径变量
+let hintDotRadius = 7; // 这里可以随时调整红点的半径大小
 
-// 扇形绘制函数
+// 鼠标按下事件
+canvas.addEventListener('mousedown', (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+
+    sectors.forEach((sector) => {
+        if (isInsideSector(mouseX, mouseY, sector)) {
+            selectedSector = sector;
+            const middleAngle = (sector.startAngle + sector.endAngle) / 2;
+
+            // 计算鼠标到中线的距离
+            const middleX = sector.centerX + Math.cos(middleAngle) * sector.radius;
+            const middleY = sector.centerY + Math.sin(middleAngle) * sector.radius;
+            const dx = mouseX - middleX;
+            const dy = mouseY - middleY;
+            const distanceToMiddleLine = Math.sqrt(dx * dx + dy * dy);
+
+            if (distanceToMiddleLine < 2* hintDotRadius) {  // 如果距离小于一定值（10像素以内），启用半径调整
+                isResizing = true;
+                initialRadius = sector.radius;
+            } else {
+                isDragging = true;
+                initialMouseAngle = Math.atan2(mouseY - sector.centerY, mouseX - sector.centerX);
+                initialStartAngle = sector.startAngle;
+                initialEndAngle = sector.endAngle;
+            }
+        }
+    });
+});
+
+// 鼠标移动事件
+canvas.addEventListener('mousemove', (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+
+    // 如果正在拖拽
+    if (isDragging && selectedSector) {
+        const currentMouseAngle = Math.atan2(mouseY - selectedSector.centerY, mouseX - selectedSector.centerX);
+        const angleDifference = currentMouseAngle - initialMouseAngle;
+
+        selectedSector.startAngle = normalizeAngle(initialStartAngle + angleDifference);
+        selectedSector.endAngle = normalizeAngle(initialEndAngle + angleDifference);
+
+        drawAllSectors();
+    }
+
+    // 如果正在调整半径
+    if (isResizing && selectedSector) {
+        const dx = mouseX - selectedSector.centerX;
+        const dy = mouseY - selectedSector.centerY;
+        const newRadius = Math.sqrt(dx * dx + dy * dy);
+
+        selectedSector.radius = newRadius;
+        drawAllSectors();
+    }
+});
+
+// 鼠标松开事件
+canvas.addEventListener('mouseup', () => {
+    if (isDragging || isResizing) {
+        isDragging = false;
+        isResizing = false;
+        selectedSector = null;
+        drawAllSectors();  // 重绘所有扇形
+    }
+});
+
+// 判断点击位置是否在某个扇形内
+function isInsideSector(mouseX, mouseY, sector) {
+    const { centerX, centerY, radius, startAngle, endAngle } = sector;
+
+    const dx = mouseX - centerX;
+    const dy = mouseY - centerY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx);
+
+    const normalizedMouseAngle = normalizeAngle(angle);
+
+    if (distance > radius) return false;
+
+    if (startAngle <= endAngle) {
+        return normalizedMouseAngle >= startAngle && normalizedMouseAngle <= endAngle;
+    } else {
+        return normalizedMouseAngle >= startAngle || normalizedMouseAngle <= endAngle;
+    }
+}
+
+// 将角度规范化到 0 到 2π 之间
+function normalizeAngle(angle) {
+    while (angle < 0) {
+        angle += 2 * Math.PI;
+    }
+    return angle % (2 * Math.PI);
+}
+
+// 绘制所有扇形
+function drawAllSectors() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    sectors.forEach(sector => {
+        drawSector(sector.centerX, sector.centerY, sector.radius, sector.startAngle, sector.endAngle, sector.color);
+
+        // 绘制中线提示圆点
+        drawResizeHint(sector);
+    });
+}
+
+// 绘制单个扇形
 function drawSector(centerX, centerY, radius, startAngle, endAngle, color) {
     ctx.beginPath();
     ctx.moveTo(centerX, centerY);
@@ -28,105 +140,30 @@ function drawSector(centerX, centerY, radius, startAngle, endAngle, color) {
     ctx.fill();
 }
 
-// 绘制所有扇形
-function drawAllSectors() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);  // 清除画布
-    sectors.forEach(sector => {
-        drawSector(sector.centerX, sector.centerY, sector.radius, sector.startAngle, sector.endAngle, sector.color);
-    });
+// 绘制调整半径提示圆点
+function drawResizeHint(sector) {
+    let startAngle = sector.startAngle;
+    let endAngle = sector.endAngle;
+
+    // 如果endAngle小于startAngle，说明角度跨越了2π，进行规范化处理
+    if (endAngle < startAngle) {
+        endAngle += 2 * Math.PI;
+    }
+
+    // 计算扇形中线的角度
+    const middleAngle = (startAngle + endAngle) / 2;
+
+    // 根据中线角度计算提示圆点的位置
+    const hintX = sector.centerX + Math.cos(middleAngle) * sector.radius;
+    const hintY = sector.centerY + Math.sin(middleAngle) * sector.radius;
+
+    // 绘制提示圆点
+    ctx.beginPath();
+    ctx.arc(hintX, hintY, hintDotRadius, 0, 2 * Math.PI);  // 半径为5的红色圆点
+    ctx.fillStyle = 'red';
+    ctx.fill();
 }
 
-// 鼠标按下事件
-canvas.addEventListener('mousedown', (event) => {
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = event.clientX - rect.left;
-    const mouseY = event.clientY - rect.top;
-
-    // 检查鼠标是否点击在某个扇形内
-    sectors.forEach((sector) => {
-        if (isInsideSector(mouseX, mouseY, sector)) {
-            selectedSector = sector;
-            isDragging = true;
-
-            // 计算初始的鼠标角度和扇形的角度
-            initialMouseAngle = Math.atan2(mouseY - sector.centerY, mouseX - sector.centerX);
-            initialStartAngle = sector.startAngle;
-            initialEndAngle = sector.endAngle;
-        }
-    });
-});
-
-// 将角度规范化到 0 到 2π 之间
-function normalizeAngle(angle) {
-    // 将角度转为正数
-    while (angle < 0) {
-        angle += 2 * Math.PI;
-    }
-
-    // 如果角度大于 2π，则取模
-    return angle % (2 * Math.PI);
-}
-
-// 鼠标移动事件
-canvas.addEventListener('mousemove', (event) => {
-    if (isDragging && selectedSector) {
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = event.clientX - rect.left;
-        const mouseY = event.clientY - rect.top;
-
-        // 计算当前鼠标相对扇形中心的角度
-        const currentMouseAngle = Math.atan2(mouseY - selectedSector.centerY, mouseX - selectedSector.centerX);
-
-        // 计算角度的变化
-        const angleDifference = currentMouseAngle - initialMouseAngle;
-
-        // 更新扇形的起始角度和结束角度，并确保角度在 0 到 2π 之间
-        selectedSector.startAngle = normalizeAngle(initialStartAngle + angleDifference);
-        selectedSector.endAngle = normalizeAngle(initialEndAngle + angleDifference);
-        // 打印扇形的起始角度和结束角度
-        console.log(`startAngle: ${selectedSector.startAngle}, endAngle: ${selectedSector.endAngle}`);
-        // 重新绘制所有扇形
-        drawAllSectors();
-    }
-});
-
-
-// 鼠标松开事件
-canvas.addEventListener('mouseup', () => {
-    if (isDragging) {
-        // 停止拖动并保持最终旋转位置
-        isDragging = false;
-        selectedSector = null;  // 重置选中扇形
-    }
-});
-
-// 判断点击位置是否在某个扇形内
-function isInsideSector(mouseX, mouseY, sector) {
-    const { centerX, centerY, radius, startAngle, endAngle } = sector;
-  
-    // 计算鼠标点击点相对于扇形中心的极坐标
-    const dx = mouseX - centerX;
-    const dy = mouseY - centerY;
-    const distance = Math.sqrt(dx * dx + dy * dy);  // 计算与扇形中心的距离
-    const angle = Math.atan2(dy, dx);  // 计算点击点的角度
-  
-    // 将负角度转换为正角度
-    const normalizedMouseAngle = normalizeAngle(angle);
-  
-    // 判断鼠标是否在扇形的半径范围内
-    if (distance > radius) {
-      return false;
-    }
-  
-    // 判断鼠标角度是否在扇形的起始角度和结束角度之间
-    if (startAngle <= endAngle) {
-      // 正常顺序
-      return normalizedMouseAngle >= startAngle && normalizedMouseAngle <= endAngle;
-    } else {
-      // 跨越0度情况
-      return normalizedMouseAngle >= startAngle || normalizedMouseAngle <= endAngle;
-    }
-  }
 
 // 初始绘制
 drawAllSectors();
